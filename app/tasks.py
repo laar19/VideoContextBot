@@ -1,3 +1,4 @@
+import httpx
 from celery import Task
 from app.celery_app import celery_app
 from app.database import SessionLocal, engine, Base
@@ -103,6 +104,13 @@ def process_video_task(
         job.completed_at = datetime.now()
         db.commit()
         
+        # Notificar al usuario si es de Telegram
+        if job.source == "telegram" and job.user_id:
+            try:
+                notify_telegram_user(job)
+            except Exception as notify_error:
+                print(f"Error notificando a Telegram: {notify_error}")
+        
         return result
         
     except Exception as e:
@@ -166,3 +174,58 @@ def delete_job_files_task(job_id: str):
     
     finally:
         db.close()
+
+
+def notify_telegram_user(job: Job):
+    """Enviar resultados al usuario de Telegram"""
+    if not job.user_id or not job.source == "telegram":
+        return
+    
+    token = settings.TELEGRAM_BOT_TOKEN
+    base_url = f"https://api.telegram.org/bot{token}"
+    
+    # Mensaje de completado
+    message = f"✅ *Job {job.job_id[:8]} - COMPLETADO*\n\n"
+    message += f"Archivo: {job.video_filename}\n"
+    message += f"Duración: {job.video_duration or 'N/A'}\n"
+    message += f"\n📄 PDF con frames y transcripción\n"
+    message += f"📦 Carpeta completa de output"
+    
+    # Enviar mensaje de texto
+    try:
+        with httpx.Client() as client:
+            client.post(f"{base_url}/sendMessage", json={
+                "chat_id": job.user_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            })
+    except Exception as e:
+        print(f"Error enviando mensaje: {e}")
+    
+    # Enviar PDF
+    if job.pdf_path and Path(job.pdf_path).exists():
+        try:
+            with open(job.pdf_path, 'rb') as f:
+                files = {'document': f}
+                data = {
+                    'chat_id': job.user_id,
+                    'caption': '📄 PDF con frames y transcripción'
+                }
+                with httpx.Client() as client:
+                    client.post(f"{base_url}/sendDocument", files=files, data=data)
+        except Exception as e:
+            print(f"Error enviando PDF: {e}")
+    
+    # Enviar ZIP
+    if job.zip_path and Path(job.zip_path).exists():
+        try:
+            with open(job.zip_path, 'rb') as f:
+                files = {'document': f}
+                data = {
+                    'chat_id': job.user_id,
+                    'caption': '📦 Carpeta completa de output'
+                }
+                with httpx.Client() as client:
+                    client.post(f"{base_url}/sendDocument", files=files, data=data)
+        except Exception as e:
+            print(f"Error enviando ZIP: {e}")
