@@ -1,0 +1,140 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: vcb_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - vcb_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vcb_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=api
+    volumes:
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./db:/app/db
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vcb_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vcb_celery_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=celery-worker
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-2}
+    volumes:
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./db:/app/db
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vcb_network
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-2}
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vcb_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=celery-beat
+    volumes:
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./db:/app/db
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vcb_network
+    command: celery -A app.celery_app beat --loglevel=info
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vcb_telegram_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=telegram-bot
+    volumes:
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./db:/app/db
+    depends_on:
+      - api
+      - redis
+    networks:
+      - vcb_network
+    command: python run_bot.py
+
+  gradio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vcb_gradio
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=gradio
+    volumes:
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./db:/app/db
+    ports:
+      - "${GRADIO_PORT:-7860}:7860"
+    depends_on:
+      - api
+      - redis
+    networks:
+      - vcb_network
+    command: python -m app.web.gradio_app
+
+volumes:
+  redis_data:
+
+networks:
+  vcb_network:
+    driver: bridge

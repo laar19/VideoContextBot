@@ -1,0 +1,43 @@
+# FastAPI and ASGI
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Celery and Redis
+celery>=5.3.6
+redis>=5.0.1
+
+# Telegram Bot
+python-telegram-bot>=20.7
+
+# Web Interface
+gradio>=4.16.0
+
+# Video Processing
+opencv-python-headless>=4.9.0
+scenedetect>=0.6.5
+pymediainfo>=6.1.0
+
+# OpenAI-compatible API (OpenAI, Groq, DeepSeek, etc.)
+openai>=1.10.0
+
+# PDF Generation
+fpdf2>=2.7.7
+
+# Image Processing
+Pillow>=10.2.0
+
+# Database
+sqlalchemy>=2.0.25
+
+# Utilities
+python-dotenv>=1.0.0
+aiofiles>=23.2.1
+httpx>=0.25.0
+
+# Logging
+python-json-logger>=2.0.7
+
+# Type hints
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
