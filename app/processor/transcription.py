@@ -59,10 +59,11 @@ def transcribe_audio(
         # Procesar segmentos con timestamps
         if hasattr(response, "segments"):
             for segment in response.segments:
+                # Los segmentos pueden ser objetos o dicts
                 result["segments"].append({
-                    "start": float(segment.get("start", 0)),
-                    "end": float(segment.get("end", 0)),
-                    "text": segment.get("text", "")
+                    "start": float(segment.start if hasattr(segment, 'start') else segment.get("start", 0)),
+                    "end": float(segment.end if hasattr(segment, 'end') else segment.get("end", 0)),
+                    "text": segment.text if hasattr(segment, 'text') else segment.get("text", "")
                 })
         
         return result

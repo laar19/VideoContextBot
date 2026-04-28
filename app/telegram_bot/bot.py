@@ -342,27 +342,30 @@ async def check_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"✅ Job {job.job_id[:8]} - COMPLETADO\n"
                     f"Archivo: {job.video_filename}\n"
                     f"Duración: {job.video_duration or 'N/A'}\n"
-                    f"\nEnviando resultados..."
+                    f"PDF: {job.pdf_path.split('/')[-1] if job.pdf_path else 'N/A'}\n"
+                    f"ZIP: {job.zip_path.split('/')[-1] if job.zip_path else 'N/A'}"
                 )
                 await update.message.reply_text(text)
                 
-                # Enviar PDF
-                if job.pdf_path and Path(job.pdf_path).exists():
-                    await context.bot.send_document(
-                        chat_id=user.id,
-                        document=open(job.pdf_path, 'rb'),
-                        filename=f"{job.video_filename.rsplit('.', 1)[0]}_report.pdf",
-                        caption="📄 PDF con frames y transcripción"
-                    )
-                
-                # Enviar ZIP
-                if job.zip_path and Path(job.zip_path).exists():
-                    await context.bot.send_document(
-                        chat_id=user.id,
-                        document=open(job.zip_path, 'rb'),
-                        filename=f"{job.video_filename.rsplit('.', 1)[0]}_output.zip",
-                        caption="📦 Carpeta completa de output"
-                    )
+                # Enviar SOLO el job más reciente completado (el primero en la lista)
+                if job == jobs[0]:
+                    # Enviar PDF
+                    if job.pdf_path and Path(job.pdf_path).exists():
+                        await context.bot.send_document(
+                            chat_id=user.id,
+                            document=open(job.pdf_path, 'rb'),
+                            filename=f"{job.video_filename.rsplit('.', 1)[0]}_report.pdf",
+                            caption="📄 PDF con frames y transcripción"
+                        )
+                    
+                    # Enviar ZIP
+                    if job.zip_path and Path(job.zip_path).exists():
+                        await context.bot.send_document(
+                            chat_id=user.id,
+                            document=open(job.zip_path, 'rb'),
+                            filename=f"{job.video_filename.rsplit('.', 1)[0]}_output.zip",
+                            caption="📦 Carpeta completa de output"
+                        )
             elif job.status == JobStatus.FAILED:
                 text = (
                     f"❌ Job {job.job_id[:8]} - FALLIDO\n"

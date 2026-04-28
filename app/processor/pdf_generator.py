@@ -36,25 +36,6 @@ class VideoContextPDF(FPDF):
             # Fallback: usar Arial y evitar caracteres problemáticos
             self.set_font('Arial', style, size)
     
-    def header(self):
-        """Header simple en cada página"""
-        # Usar font que soporte Unicode
-        try:
-            self.set_font('DejaVu', 'I', 8)
-        except:
-            self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f"VideoContextBot - {self.video_filename[:50]}", 0, 1, 'R')
-        self.ln(5)
-    
-    def footer(self):
-        """Footer con número de página"""
-        try:
-            self.set_font('DejaVu', 'I', 8)
-        except:
-            self.set_font('Arial', 'I', 8)
-        self.set_y(-15)
-        self.cell(0, 10, f"Página {self.page_no()}", 0, 0, 'C')
-    
     def add_portada(self, additional_notes: Optional[str] = None):
         """Agregar portada del PDF"""
         self.add_page()
@@ -111,19 +92,39 @@ class VideoContextPDF(FPDF):
         timestamp: float,
         transcription_segments: list[str]
     ):
-        """Agregar frame con su transcripción correspondiente"""
+        """Agregar frame con transcripción ENCIMA"""
         self.add_page()
         
         # Timestamp y número de frame
-        self.set_font('Arial', 'B', 12)
+        self._set_unicode_font('B', 12)
         timestamp_str = format_timestamp(timestamp)
         self.cell(0, 10, f"Frame {frame_num} - {timestamp_str}", 0, 1, 'L')
+        
+        # Transcripción relevante (ARRIBA de la imagen)
+        if transcription_segments:
+            self._set_unicode_font('B', 9)
+            self.cell(0, 6, "Transcripción (±15s):", 0, 1, 'L')
+            
+            self._set_unicode_font('', 8)
+            self.set_fill_color(240, 240, 240)
+            self.set_x(10)
+            
+            # Combinar segmentos en un texto
+            full_text = " ".join(transcription_segments)
+            
+            # Multi_cell con fondo
+            self.multi_cell(
+                190, 5,
+                full_text,
+                0, 'L', fill=True
+            )
+            
+            self.ln(3)
         
         # Imagen del frame
         try:
             # Calcular dimensiones para mantener aspect ratio
             page_width = self.w - 40  # Márgenes
-            page_height = self.h - 60  # Espacio para header/footer/texto
             
             img_info = self.image(frame_path, x=20, y=self.get_y(), w=page_width)
             
@@ -137,30 +138,6 @@ class VideoContextPDF(FPDF):
             print(f"Error insertando imagen {frame_path}: {e}")
             self.cell(0, 10, f"[Imagen no disponible: {Path(frame_path).name}]", 0, 1, 'L')
             self.ln(10)
-        
-        # Transcripción relevante
-        if transcription_segments:
-            self.set_font('Arial', 'B', 10)
-            self.cell(0, 8, "Transcripción relevante (±15s):", 0, 1, 'L')
-            
-            self.set_font('Arial', '', 9)
-            self.set_fill_color(240, 240, 240)
-            self.set_x(10)
-            
-            # Combinar segmentos en un texto
-            full_text = " ".join(transcription_segments)
-            
-            # Multi_cell con fondo
-            self.multi_cell(
-                190, 6,
-                full_text,
-                0, 'L', fill=True
-            )
-        else:
-            self.set_font('Arial', 'I', 9)
-            self.set_text_color(150, 150, 150)
-            self.cell(0, 10, "(Sin transcripción en este segmento)", 0, 1, 'L')
-            self.set_text_color(0, 0, 0)
     
     def add_no_audio_section(self):
         """Agregar sección especial para videos sin audio"""
