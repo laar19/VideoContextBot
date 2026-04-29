@@ -20,10 +20,10 @@ def process_video_gradio(
     """
     Procesar video desde interfaz Gradio
     
-    Returns: (mensaje, PDF, ZIP, logs, job_id)
+    Returns: (mensaje, PDF, ZIP, logs, job_id, cancel_btn_visible)
     """
     if video_file is None:
-        return "❌ Error: Debes subir un video", None, None, "", None
+        return "❌ Error: Debes subir un video", None, None, "", None, False
     
     job_id = generate_job_id()
     temp_dir = create_temp_folder(job_id)
@@ -35,7 +35,7 @@ def process_video_gradio(
     # Validar video
     is_valid, error_msg = validate_video_file(str(video_path))
     if not is_valid:
-        return f"❌ Error: {error_msg}", None, None, "", None
+        return f"❌ Error: {error_msg}", None, None, "", None, False
     
     # Combinar notas
     additional_notes = notes_text or ""
@@ -87,7 +87,7 @@ def process_video_gradio(
                 break
             
             # FORZAR refresh desde DB para obtener datos actualizados
-            db.refresh(job)
+            db.expire_all(job)  # Forzar recarga de todos los atributos
             
             log_lines.append(
                 f"[{datetime.now().strftime('%H:%M:%S')}] "
@@ -109,14 +109,15 @@ def process_video_gradio(
                         pdf_path,
                         zip_path,
                         "\n".join(log_lines),
-                        job_id
+                        job_id,
+                        False  # Ocultar botón cancelar
                     )
                 else:
-                    return "❌ Error: Archivos de output no encontrados", None, None, "\n".join(log_lines), None
+                    return "❌ Error: Archivos de output no encontrados", None, None, "\n".join(log_lines), None, False
             
             elif job.status == JobStatus.FAILED:
                 log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {job.error_message}")
-                return f"❌ Error: {job.error_message}", None, None, "\n".join(log_lines), None
+                return f"❌ Error: {job.error_message}", None, None, "\n".join(log_lines), None, False
             
             time.sleep(2)  # Poll cada 2 segundos
         
@@ -127,7 +128,8 @@ def process_video_gradio(
             None,
             None,
             "\n".join(log_lines),
-            job_id
+            job_id,
+            False  # Ocultar botón cancelar después de timeout
         )
         
     finally:
@@ -237,8 +239,14 @@ def create_gradio_app():
             """
         )
         
-        # Botón de cancelar
+        # Botón de cancelar (oculto inicialmente)
         cancel_btn = gr.Button("❌ Cancelar Proceso", variant="stop", visible=False)
+        
+        # Función para mostrar botón durante procesamiento
+        def show_cancel_button(job_id):
+            if job_id:
+                return gr.update(visible=True)
+            return gr.update(visible=False)
         
         # Función para cancelar
         def cancel_current_job(job_id):
@@ -246,10 +254,10 @@ def create_gradio_app():
                 try:
                     from app.tasks import delete_job_files_task
                     delete_job_files_task.delay(job_id=job_id)
-                    return "Proceso cancelado por usuario", None, None, ["Proceso cancelado"], None
+                    return "Proceso cancelado por usuario", None, None, ["Proceso cancelado"], None, gr.update(visible=False)
                 except Exception as e:
-                    return f"Error al cancelar: {e}", None, None, [], None
-            return "No hay proceso activo", None, None, [], None
+                    return f"Error al cancelar: {e}", None, None, [], None, gr.update(visible=False)
+            return "No hay proceso activo", None, None, [], None, gr.update(visible=False)
         
         # Conectar botón de procesar
         process_btn.click(
@@ -257,7 +265,7 @@ def create_gradio_app():
             inputs=[video_input, notes_text, notes_file],
             outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state]
         ).then(
-            fn=lambda x: gr.update(visible=False),
+            fn=show_cancel_button,
             inputs=[job_id_state],
             outputs=[cancel_btn]
         )
@@ -266,7 +274,7 @@ def create_gradio_app():
         cancel_btn.click(
             fn=cancel_current_job,
             inputs=[job_id_state],
-            outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state]
+            outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state, cancel_btn]
         )
     
     return demo

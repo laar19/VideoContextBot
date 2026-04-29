@@ -176,26 +176,25 @@ def subsample_frames(frames_info: list[dict], max_count: int) -> list[dict]:
     """
     Subsamplear frames para no exceder el máximo
     
-    Estrategia: seleccionar frames equidistantes
+    Estrategia: seleccionar frames equidistantes usando índices flotantes
     """
     if len(frames_info) <= max_count:
         return frames_info
     
-    # Calcular índice de paso
-    step = len(frames_info) / max_count
-    
-    selected = []
-    for i in range(0, len(frames_info), int(step)):
-        if len(selected) >= max_count:
-            break
-        selected.append(frames_info[i])
+    # Calcular índices de muestreo uniforme
+    indices = [int(i * len(frames_info) / max_count) for i in range(max_count)]
     
     # Asegurar que el último frame esté incluido
-    if selected and selected[-1] != frames_info[-1]:
-        if len(selected) < max_count:
-            selected.append(frames_info[-1])
-        else:
-            selected[-1] = frames_info[-1]
+    if indices[-1] != len(frames_info) - 1:
+        indices[-1] = len(frames_info) - 1
+    
+    # Seleccionar frames únicos (evitar duplicados por redondeo)
+    selected = []
+    seen_indices = set()
+    for idx in indices:
+        if idx not in seen_indices:
+            selected.append(frames_info[idx])
+            seen_indices.add(idx)
     
     # Renumerar frames
     for idx, frame in enumerate(selected):
