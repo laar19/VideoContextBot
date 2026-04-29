@@ -89,16 +89,16 @@ def process_video_task(
         if result["success"]:
             job.status = JobStatus.COMPLETED
             job.has_audio = result["has_audio"]
-            job.video_duration = result["video_info"].get("duration", "N/A")
-            job.output_folder = result["output_folder"]
-            job.transcription_path = result["transcription_path"]
-            job.pdf_path = result["pdf_path"]
-            job.zip_path = result["zip_path"]
+            job.video_duration = str(result["video_info"].get("duration", "N/A"))
+            job.output_folder = str(result["output_folder"])
+            job.transcription_path = str(result["transcription_path"])
+            job.pdf_path = str(result["pdf_path"])
+            job.zip_path = str(result["zip_path"])
             job.progress = 100
             job.progress_message = "Completado"
         else:
             job.status = JobStatus.FAILED
-            job.error_message = result.get("error", "Error desconocido")
+            job.error_message = str(result.get("error", "Error desconocido"))
             job.progress = 0
         
         job.completed_at = datetime.now()
