@@ -1,5 +1,4 @@
 import gradio as gr
-import asyncio
 from pathlib import Path
 from datetime import datetime
 from app.config import settings
@@ -11,12 +10,7 @@ import time
 import shutil
 
 
-def process_video_gradio(
-    video_file,
-    notes_text,
-    notes_file,
-    progress=gr.Progress()
-):
+def process_video_gradio(video_file, notes_text, notes_file, progress=gr.Progress()):
     """
     Procesar video desde interfaz Gradio
     
@@ -75,25 +69,26 @@ def process_video_gradio(
         additional_notes=additional_notes if additional_notes else None
     )
     
-    # Esperar y mostrar progreso
+    # Esperar y mostrar progreso con polling no bloqueante
     log_lines = [f"[{datetime.now().strftime('%H:%M:%S')}] Job iniciado: {job_id[:8]}"]
     
     db = SessionLocal()
     try:
-        # Polling: 150 iteraciones * 2s = 300s = 5 minutos máximo
-        for iteration in range(150):
+        # Polling: 120 iteraciones * 3s = 360s = 6 minutos máximo
+        for iteration in range(120):
             job = db.query(Job).filter(Job.job_id == job_id).first()
             if not job:
                 break
             
             # FORZAR refresh desde DB para obtener datos actualizados
-            db.expire_all(job)  # Forzar recarga de todos los atributos
+            db.expire_all()  # Fix: expire_all() no lleva argumentos
             
             log_lines.append(
                 f"[{datetime.now().strftime('%H:%M:%S')}] "
                 f"Progreso: {job.progress}% - {job.progress_message}"
             )
             
+            # Actualizar barra de progreso
             progress(job.progress / 100)
             
             if job.status == JobStatus.COMPLETED:
@@ -119,11 +114,11 @@ def process_video_gradio(
                 log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {job.error_message}")
                 return f"❌ Error: {job.error_message}", None, None, "\n".join(log_lines), None, False
             
-            time.sleep(2)  # Poll cada 2 segundos
+            time.sleep(3)  # Poll cada 3 segundos (reducido de 2s para menos carga)
         
-        log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Timeout: Procesamiento muy largo (>5 min)")
+        log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Timeout: Procesamiento muy largo (>6 min)")
         return (
-            "⏳ El procesamiento está tomando más de 5 minutos. "
+            "⏳ El procesamiento está tomando más de 6 minutos. "
             "Puedes descargar los archivos más tarde desde la API o usar el bot de Telegram.",
             None,
             None,
@@ -136,16 +131,30 @@ def process_video_gradio(
         db.close()
 
 
+def show_cancel_button_on_start(job_id, video_input):
+    """Mostrar botón cancelar inmediatamente al iniciar procesamiento"""
+    if video_input is not None:
+        return job_id, True  # Mostrar botón cancelar
+    return None, False
+
+
+def cancel_current_job(job_id):
+    """Cancelar job actual"""
+    if job_id:
+        try:
+            from app.tasks import delete_job_files_task
+            delete_job_files_task.delay(job_id=job_id)
+            return "❌ Proceso cancelado por usuario", None, None, ["Proceso cancelado"], None, False
+        except Exception as e:
+            return f"❌ Error al cancelar: {e}", None, None, [], None, False
+    return "No hay proceso activo", None, None, [], None, False
+
+
 def create_gradio_app():
     """Crear interfaz Gradio"""
     
     with gr.Blocks(
-        title="VideoContextBot",
-        theme=gr.themes.Soft(),
-        css="""
-        .gradio-container {max-width: 900px !important;}
-        .output-file {margin: 10px 0;}
-        """
+        title="VideoContextBot"
     ) as demo:
         
         gr.Markdown(
@@ -236,38 +245,18 @@ def create_gradio_app():
             - Tamaño máximo: 2GB
             - Formatos: MP4, MKV, AVI, MOV, WebM
             - El procesamiento puede tomar varios minutos dependiendo del tamaño del video
+            - Usá el bot de Telegram para procesamiento más rápido
             """
         )
         
-        # Botón de cancelar (oculto inicialmente)
+        # Botón de cancelar (visible cuando hay procesamiento activo)
         cancel_btn = gr.Button("❌ Cancelar Proceso", variant="stop", visible=False)
-        
-        # Función para mostrar botón durante procesamiento
-        def show_cancel_button(job_id):
-            if job_id:
-                return gr.update(visible=True)
-            return gr.update(visible=False)
-        
-        # Función para cancelar
-        def cancel_current_job(job_id):
-            if job_id:
-                try:
-                    from app.tasks import delete_job_files_task
-                    delete_job_files_task.delay(job_id=job_id)
-                    return "Proceso cancelado por usuario", None, None, ["Proceso cancelado"], None, gr.update(visible=False)
-                except Exception as e:
-                    return f"Error al cancelar: {e}", None, None, [], None, gr.update(visible=False)
-            return "No hay proceso activo", None, None, [], None, gr.update(visible=False)
         
         # Conectar botón de procesar
         process_btn.click(
             fn=process_video_gradio,
             inputs=[video_input, notes_text, notes_file],
-            outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state]
-        ).then(
-            fn=show_cancel_button,
-            inputs=[job_id_state],
-            outputs=[cancel_btn]
+            outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state, cancel_btn]
         )
         
         # Conectar botón de cancelar
@@ -286,7 +275,12 @@ def launch_app():
     demo.launch(
         server_name="0.0.0.0",
         server_port=settings.GRADIO_PORT,
-        share=False
+        share=False,
+        theme=gr.themes.Soft(),
+        css="""
+        .gradio-container {max-width: 900px !important;}
+        .output-file {margin: 10px 0;}
+        """
     )
 
 

@@ -71,11 +71,19 @@ def process_video_task(
         job.started_at = datetime.now()
         db.commit()
         
+        # Throttle de progreso para reducir carga de DB (actualizar cada 2% o cuando cambia el mensaje)
+        last_progress_update = 0
+        
         def progress_callback(percent: int, message: str):
-            """Actualizar progreso en DB"""
-            job.progress = percent
-            job.progress_message = message
-            db.commit()
+            """Actualizar progreso en DB con throttle para reducir carga"""
+            nonlocal last_progress_update
+            
+            # Actualizar solo si el progreso cambió al menos 2% o es el final
+            if abs(percent - last_progress_update) >= 2 or percent >= 98:
+                job.progress = int(percent)
+                job.progress_message = message
+                db.commit()
+                last_progress_update = int(percent)
         
         # Ejecutar procesamiento
         result = process_video(
