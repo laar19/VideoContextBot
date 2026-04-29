@@ -80,6 +80,25 @@ class VideoContextPDF(FPDF):
             print(f"Error insertando imagen {frame_path}: {e}")
             self.cell(0, 10, f"[Imagen no disponible: {Path(frame_path).name}]", 0, 1, 'L')
             self.ln(10)
+    
+    def add_full_transcription_page(self, transcription_result: dict):
+        """Página final con transcripción COMPLETA"""
+        self.add_page()
+        self._set_unicode_font('B', 14)
+        self.cell(0, 10, "Transcripción Completa", 0, 1, 'L')
+        self.ln(5)
+        
+        self._set_unicode_font('', 9)
+        segments = transcription_result.get("segments", [])
+        
+        for segment in segments:
+            start = format_timestamp(segment.get("start", 0))
+            end = format_timestamp(segment.get("end", 0))
+            text = segment.get("text", "").strip()
+            
+            # Formato: [00:00 - 00:15] Texto de la transcripción...
+            self.multi_cell(0, 5, f"[{start} - {end}] {text}", 0, 'L')
+            self.ln(1)
 
 
 def generate_pdf(
@@ -117,12 +136,16 @@ def generate_pdf(
             transcription_segments=transcription_segments
         )
     
+    # NUEVO: Agregar transcripción completa al final
+    if has_audio and transcription_result:
+        pdf.add_full_transcription_page(transcription_result)
+    
     # Guardar PDF
     pdf_path = output_folder / "report.pdf"
     pdf_output = str(pdf_path)
     pdf.output(pdf_output)
     
-    return pdf_output
+    return pdf_path
 
 
 def get_segments_for_timestamp(transcription_result: dict, timestamp: float, window_seconds: float = 15.0) -> list[str]:

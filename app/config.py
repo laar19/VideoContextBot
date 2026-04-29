@@ -41,7 +41,10 @@ class Settings(BaseSettings):
 
     # Video Processing
     MAX_VIDEO_SIZE_MB: int = Field(default=2048, description="Tamaño máximo de video en MB")
-    SCENE_DETECT_THRESHOLD: float = Field(default=30.0, description="Threshold para detección de escenas")
+    SCENE_DETECT_THRESHOLD: float = Field(default=15.0, description="Threshold para detección de escenas (15 para screen recordings)")
+    MIN_FRAME_COUNT: int = Field(default=10, description="Mínimo de frames a extraer")
+    MAX_FRAME_COUNT: int = Field(default=50, description="Máximo de frames")
+    FRAME_INTERVAL_SECONDS: int = Field(default=10, description="Intervalo para extracción por fallback")
     CELERY_CONCURRENCY: int = Field(default=2, description="Workers Celery concurrentes")
 
     # Directories

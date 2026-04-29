@@ -108,10 +108,6 @@ def extract_frames(
             start_in_scene=True
         )
         
-        if not scene_list:
-            # No se detectaron escenas, extraer frames por intervalo
-            return extract_frames_interval(video_path, output_dir, interval_seconds=30)
-        
         # Abrir video con OpenCV
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -125,10 +121,9 @@ def extract_frames(
             ret, frame = cap.read()
             
             if ret:
-                timestamp = start_sec  # en segundos
+                timestamp = start_sec
                 timestamp_str = format_timestamp_for_filename(timestamp)
                 
-                # Guardar frame
                 frame_filename = f"frame_{idx + 1:03d}_{timestamp_str}.jpg"
                 frame_path = output_dir / frame_filename
                 
@@ -151,19 +146,62 @@ def extract_frames(
         
         cap.release()
         
-        # Si hay muy pocos frames, agregar algunos por intervalo
-        if len(frames_info) < 3:
+        # Si hay muy pocos frames, agregar por intervalo
+        if len(frames_info) < settings.MIN_FRAME_COUNT:
             additional = extract_frames_interval(
-                video_path, output_dir, interval_seconds=60, start_after=frames_info
+                video_path, 
+                output_dir, 
+                interval_seconds=settings.FRAME_INTERVAL_SECONDS,
+                start_after=frames_info
             )
             frames_info.extend(additional)
+        
+        # Si hay demasiados frames, subsamplear
+        if len(frames_info) > settings.MAX_FRAME_COUNT:
+            frames_info = subsample_frames(frames_info, settings.MAX_FRAME_COUNT)
         
     except Exception as e:
         print(f"Error extrayendo frames: {e}")
         # Fallback: extraer por intervalo
-        frames_info = extract_frames_interval(video_path, output_dir, interval_seconds=30)
+        frames_info = extract_frames_interval(
+            video_path, 
+            output_dir, 
+            interval_seconds=settings.FRAME_INTERVAL_SECONDS
+        )
     
-    return frames_info
+    return frames_info[:settings.MAX_FRAME_COUNT]
+
+
+def subsample_frames(frames_info: list[dict], max_count: int) -> list[dict]:
+    """
+    Subsamplear frames para no exceder el máximo
+    
+    Estrategia: seleccionar frames equidistantes
+    """
+    if len(frames_info) <= max_count:
+        return frames_info
+    
+    # Calcular índice de paso
+    step = len(frames_info) / max_count
+    
+    selected = []
+    for i in range(0, len(frames_info), int(step)):
+        if len(selected) >= max_count:
+            break
+        selected.append(frames_info[i])
+    
+    # Asegurar que el último frame esté incluido
+    if selected and selected[-1] != frames_info[-1]:
+        if len(selected) < max_count:
+            selected.append(frames_info[-1])
+        else:
+            selected[-1] = frames_info[-1]
+    
+    # Renumerar frames
+    for idx, frame in enumerate(selected):
+        frame["frame_num"] = idx + 1
+    
+    return selected
 
 
 def extract_frames_interval(

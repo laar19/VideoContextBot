@@ -20,10 +20,10 @@ def process_video_gradio(
     """
     Procesar video desde interfaz Gradio
     
-    Returns: (mensaje, PDF, ZIP, logs)
+    Returns: (mensaje, PDF, ZIP, logs, job_id)
     """
     if video_file is None:
-        return "❌ Error: Debes subir un video", None, None, ""
+        return "❌ Error: Debes subir un video", None, None, "", None
     
     job_id = generate_job_id()
     temp_dir = create_temp_folder(job_id)
@@ -35,7 +35,7 @@ def process_video_gradio(
     # Validar video
     is_valid, error_msg = validate_video_file(str(video_path))
     if not is_valid:
-        return f"❌ Error: {error_msg}", None, None, ""
+        return f"❌ Error: {error_msg}", None, None, "", None
     
     # Combinar notas
     additional_notes = notes_text or ""
@@ -80,10 +80,14 @@ def process_video_gradio(
     
     db = SessionLocal()
     try:
-        for _ in range(300):  # Máximo 5 minutos de espera (300 * 1s)
+        # Polling: 150 iteraciones * 2s = 300s = 5 minutos máximo
+        for iteration in range(150):
             job = db.query(Job).filter(Job.job_id == job_id).first()
             if not job:
                 break
+            
+            # FORZAR refresh desde DB para obtener datos actualizados
+            db.refresh(job)
             
             log_lines.append(
                 f"[{datetime.now().strftime('%H:%M:%S')}] "
@@ -104,24 +108,26 @@ def process_video_gradio(
                         "✅ ¡Procesamiento completado! Descarga los archivos abajo.",
                         pdf_path,
                         zip_path,
-                        "\n".join(log_lines)
+                        "\n".join(log_lines),
+                        job_id
                     )
                 else:
-                    return "❌ Error: Archivos de output no encontrados", None, None, "\n".join(log_lines)
+                    return "❌ Error: Archivos de output no encontrados", None, None, "\n".join(log_lines), None
             
             elif job.status == JobStatus.FAILED:
                 log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {job.error_message}")
-                return f"❌ Error: {job.error_message}", None, None, "\n".join(log_lines)
+                return f"❌ Error: {job.error_message}", None, None, "\n".join(log_lines), None
             
-            time.sleep(1)
+            time.sleep(2)  # Poll cada 2 segundos
         
-        log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Timeout: Procesamiento muy largo")
+        log_lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] Timeout: Procesamiento muy largo (>5 min)")
         return (
-            "⏳ El procesamiento está tomando más de lo esperado. "
-            "Puedes descargar los archivos más tarde desde la API o esperar.",
+            "⏳ El procesamiento está tomando más de 5 minutos. "
+            "Puedes descargar los archivos más tarde desde la API o usar el bot de Telegram.",
             None,
             None,
-            "\n".join(log_lines)
+            "\n".join(log_lines),
+            job_id
         )
         
     finally:
@@ -218,6 +224,9 @@ def create_gradio_app():
             interactive=False
         )
         
+        # Estado oculto para job_id
+        job_id_state = gr.State(value=None)
+        
         gr.Markdown(
             """
             ---
@@ -228,11 +237,36 @@ def create_gradio_app():
             """
         )
         
-        # Conectar botón
+        # Botón de cancelar
+        cancel_btn = gr.Button("❌ Cancelar Proceso", variant="stop", visible=False)
+        
+        # Función para cancelar
+        def cancel_current_job(job_id):
+            if job_id:
+                try:
+                    from app.tasks import delete_job_files_task
+                    delete_job_files_task.delay(job_id=job_id)
+                    return "Proceso cancelado por usuario", None, None, ["Proceso cancelado"], None
+                except Exception as e:
+                    return f"Error al cancelar: {e}", None, None, [], None
+            return "No hay proceso activo", None, None, [], None
+        
+        # Conectar botón de procesar
         process_btn.click(
             fn=process_video_gradio,
             inputs=[video_input, notes_text, notes_file],
-            outputs=[status_output, pdf_output, zip_output, logs_output]
+            outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state]
+        ).then(
+            fn=lambda x: gr.update(visible=False),
+            inputs=[job_id_state],
+            outputs=[cancel_btn]
+        )
+        
+        # Conectar botón de cancelar
+        cancel_btn.click(
+            fn=cancel_current_job,
+            inputs=[job_id_state],
+            outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state]
         )
     
     return demo
