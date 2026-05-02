@@ -52,7 +52,8 @@ def process_video_task(
     self,
     job_id: str,
     video_path: str,
-    additional_notes: str = None
+    additional_notes: str = None,
+    frame_interval: int = None
 ):
     """
     Tarea Celery para procesamiento de video en background
@@ -66,9 +67,10 @@ def process_video_task(
         if not job:
             raise ValueError(f"Job {job_id} no encontrado")
         
-        # Actualizar estado
+        # Actualizar estado y frame_interval
         job.status = JobStatus.PROCESSING
         job.started_at = datetime.now()
+        job.frame_interval = frame_interval
         db.commit()
         
         # Throttle de progreso para reducir carga de DB (actualizar cada 2% o cuando cambia el mensaje)
@@ -90,7 +92,8 @@ def process_video_task(
             video_path=video_path,
             job_id=job_id,
             additional_notes=additional_notes,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            frame_interval=frame_interval or job.frame_interval
         )
         
         # Actualizar job con resultados

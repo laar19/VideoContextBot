@@ -1,4 +1,6 @@
 import gradio as gr
+import json
+import os
 from pathlib import Path
 from datetime import datetime
 from app.config import settings
@@ -10,7 +12,35 @@ import time
 import shutil
 
 
-def process_video_gradio(video_file, notes_text, notes_file, progress=gr.Progress()):
+# Archivo para persistencia del intervalo
+FRAME_INTERVAL_FILE = "/app/data/gradio_frame_interval.json"
+
+
+def load_frame_interval() -> int:
+    """Cargar intervalo guardado (persistente entre recargas)"""
+    try:
+        path = Path(FRAME_INTERVAL_FILE)
+        if path.exists():
+            with open(path, "r") as f:
+                data = json.load(f)
+                return data.get("interval", 0)
+    except Exception as e:
+        print(f"Error cargando intervalo: {e}")
+    return 0
+
+
+def save_frame_interval(value: int):
+    """Guardar intervalo (persistente entre recargas)"""
+    try:
+        path = Path(FRAME_INTERVAL_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"interval": value}, f)
+    except Exception as e:
+        print(f"Error guardando intervalo: {e}")
+
+
+def process_video_gradio(video_file, notes_text, notes_file, frame_interval, progress=gr.Progress()):
     """
     Procesar video desde interfaz Gradio
     
@@ -44,6 +74,9 @@ def process_video_gradio(video_file, notes_text, notes_file, progress=gr.Progres
         except Exception as e:
             additional_notes += f"\n\n[Error leyendo archivo de notas: {e}]"
     
+    # frame_interval: 0 = Auto (scene detection), >0 = segundos entre capturas
+    fi = frame_interval if frame_interval and frame_interval > 0 else None
+    
     # Crear job en DB
     db = SessionLocal()
     try:
@@ -55,7 +88,8 @@ def process_video_gradio(video_file, notes_text, notes_file, progress=gr.Progres
             additional_notes=additional_notes if additional_notes else None,
             source="web",
             progress=0,
-            progress_message="Esperando procesamiento..."
+            progress_message="Esperando procesamiento...",
+            frame_interval=fi
         )
         db.add(job)
         db.commit()
@@ -66,7 +100,8 @@ def process_video_gradio(video_file, notes_text, notes_file, progress=gr.Progres
     process_video_task.delay(
         job_id=job_id,
         video_path=str(video_path),
-        additional_notes=additional_notes if additional_notes else None
+        additional_notes=additional_notes if additional_notes else None,
+        frame_interval=fi
     )
     
     # Esperar y mostrar progreso con polling no bloqueante
@@ -181,6 +216,21 @@ def create_gradio_app():
                     type="filepath"
                 )
                 
+                gr.Markdown("### 🎯 Intervalo de Captura")
+                
+                frame_interval = gr.Slider(
+                    label="Segundos entre capturas (0 = Auto / detección de escenas)",
+                    minimum=0,
+                    maximum=30,
+                    step=1,
+                    value=load_frame_interval()
+                )
+                
+                gr.Markdown(
+                    "Valores recomendados: 1, 2, 3, 5, 9, 30<br>"
+                    "Se guarda automáticamente en tu navegador."
+                )
+                
                 gr.Markdown("### 📝 Notas Adicionales (Opcional)")
                 
                 notes_text = gr.Textbox(
@@ -238,6 +288,10 @@ def create_gradio_app():
         # Estado oculto para job_id
         job_id_state = gr.State(value=None)
         
+        # Estado para intervalo (cargado desde disco al iniciar)
+        default_interval = load_frame_interval()
+        frame_interval_state = gr.State(value=default_interval)
+        
         gr.Markdown(
             """
             ---
@@ -255,8 +309,19 @@ def create_gradio_app():
         # Conectar botón de procesar
         process_btn.click(
             fn=process_video_gradio,
-            inputs=[video_input, notes_text, notes_file],
+            inputs=[video_input, notes_text, notes_file, frame_interval],
             outputs=[status_output, pdf_output, zip_output, logs_output, job_id_state, cancel_btn]
+        ).then(
+            fn=lambda: None,
+            inputs=[],
+            outputs=[]
+        )
+        
+        # Persistir intervalo al cambiar (guarda a disco entre recargas)
+        frame_interval.change(
+            fn=save_frame_interval,
+            inputs=[frame_interval],
+            outputs=[]
         )
         
         # Conectar botón de cancelar

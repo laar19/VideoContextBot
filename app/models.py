@@ -56,6 +56,9 @@ class Job(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
+    # Frame interval config
+    frame_interval = Column(Integer, nullable=True)  # segundos, None = Auto (scene detection)
+
     # Metadata extra
     user_id = Column(String, nullable=True)  # ID de Telegram o "web"
     source = Column(String, default="api")  # "telegram", "web", "api"

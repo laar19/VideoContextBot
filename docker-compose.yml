@@ -101,6 +101,7 @@ services:
       - ./temp:/app/temp
       - ./logs:/app/logs
       - ./db:/app/db
+      - ./data:/app/data
     depends_on:
       - api
       - redis
@@ -123,6 +124,7 @@ services:
       - ./temp:/app/temp
       - ./logs:/app/logs
       - ./db:/app/db
+      - ./data:/app/data
     ports:
       - "${GRADIO_PORT:-7860}:7860"
     depends_on:

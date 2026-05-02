@@ -20,7 +20,8 @@ def process_video(
     video_path: str,
     job_id: str,
     additional_notes: Optional[str] = None,
-    progress_callback: Optional[Callable[[int, str], None]] = None
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    frame_interval: Optional[int] = None
 ) -> dict:
     """
     Orquestador principal del procesamiento de video
@@ -30,6 +31,7 @@ def process_video(
         job_id: ID único del job
         additional_notes: Notas adicionales opcionales
         progress_callback: Callback para reportar progreso (progress_percent, message)
+        frame_interval: Intervalo en segundos entre capturas. None o 0 = Auto (scene detection)
     
     Returns: dict con resultados del procesamiento
     """
@@ -65,7 +67,11 @@ def process_video(
         
         # 3. Extraer frames
         report_progress(5, "Extrayendo frames...")
-        frames_info = extract_frames(video_path, output_folder / "captures")
+        frames_info = extract_frames(
+            video_path,
+            output_folder / "captures",
+            interval_seconds=frame_interval
+        )
         result["frames_extracted"] = len(frames_info)
         
         # 4. Transcribir audio (si existe)

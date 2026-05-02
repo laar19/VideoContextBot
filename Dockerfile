@@ -34,8 +34,8 @@ ENV PATH=/root/.local/bin:$PATH
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/output /app/temp /app/logs /app/db && \
-    chmod -R 755 /app/output /app/temp /app/logs /app/db
+RUN mkdir -p /app/output /app/temp /app/logs /app/db /app/data && \
+    chmod -R 755 /app/output /app/temp /app/logs /app/db /app/data
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

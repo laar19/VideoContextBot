@@ -88,16 +88,35 @@ def get_video_info(video_path: str) -> dict:
 def extract_frames(
     video_path: str,
     output_dir: Path,
-    threshold: Optional[float] = None
+    threshold: Optional[float] = None,
+    interval_seconds: Optional[int] = None
 ) -> list[dict]:
     """
     Extraer frames únicos detectando cambios de escena con PySceneDetect
+    
+    Args:
+        video_path: Path al video
+        output_dir: Directorio de salida
+        threshold: Threshold para detección de escenas
+        interval_seconds: Si > 0, usa extracción por intervalo en vez de scene detection.
+                         None o 0 = Auto (scene detection con fallback por intervalo)
     
     Returns: Lista de dicts con {'frame_num', 'timestamp', 'path'}
     """
     if threshold is None:
         threshold = settings.SCENE_DETECT_THRESHOLD
     
+    # Si se especificó intervalo, usar extracción por intervalo directamente
+    if interval_seconds and interval_seconds > 0:
+        frames_info = extract_frames_interval(
+            video_path,
+            output_dir,
+            interval_seconds=interval_seconds
+        )
+        if len(frames_info) > settings.MAX_FRAME_COUNT:
+            frames_info = subsample_frames(frames_info, settings.MAX_FRAME_COUNT)
+        return frames_info[:settings.MAX_FRAME_COUNT]
+
     frames_info = []
     
     try:

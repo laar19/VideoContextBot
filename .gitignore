@@ -35,11 +35,11 @@ ENV/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
-# Output and temp directories
-output/
-temp/
-logs/
+# Data directory (user config persistence)
+data/
 
 # IDE
 .idea/

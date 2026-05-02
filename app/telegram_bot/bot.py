@@ -1,4 +1,6 @@
 import logging
+import json
+import os
 from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
@@ -30,6 +32,46 @@ WAITING_NOTES, WAITING_FILE = range(2)
 
 # Almacenamiento temporal de datos de usuario
 user_data_store = {}
+
+# Archivo para persistencia de intervalos
+INTERVAL_STORE_PATH = "/app/data/user_intervals.json"
+
+
+def load_user_intervals() -> dict:
+    """Cargar intervalos persistentes por usuario"""
+    try:
+        path = Path(INTERVAL_STORE_PATH)
+        if path.exists():
+            with open(path, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Error cargando intervalos: {e}")
+    return {}
+
+
+def save_user_intervals(intervals: dict):
+    """Guardar intervalos persistentes por usuario"""
+    try:
+        path = Path(INTERVAL_STORE_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(intervals, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error guardando intervalos: {e}")
+
+
+def get_user_interval(user_id: int) -> int | None:
+    """Obtener intervalo guardado del usuario (None = Auto)"""
+    intervals = load_user_intervals()
+    val = intervals.get(str(user_id), 0)
+    return val if val > 0 else None
+
+
+def set_user_interval(user_id: int, interval: int):
+    """Guardar intervalo del usuario"""
+    intervals = load_user_intervals()
+    intervals[str(user_id)] = interval
+    save_user_intervals(intervals)
 
 
 def is_authorized(user_id: int) -> bool:
@@ -96,10 +138,72 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Iniciar el bot\n"
         "/ayuda - Mostrar esta ayuda\n"
         "/estado - Ver jobs en progreso\n"
-        "/cancelar - Cancelar job actual"
+        "/cancelar - Cancelar job actual\n"
+        "/interval - Configurar intervalo de captura de frames\n"
+        "  Ej: /interval 5 (cada 5 segundos)\n"
+        "  Ej: /interval auto (detección de escenas)"
     )
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
+
+async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /interval - Configurar intervalo de captura de frames"""
+    user = update.effective_user
+
+    if not is_authorized(user.id):
+        return
+
+    args = context.args
+    if not args:
+        current = get_user_interval(user.id)
+        if current:
+            msg = (
+                f"📸 *Intervalo actual:* {current} segundos\n\n"
+                "Para cambiarlo, usa:\n"
+                "`/interval <segundos>` (1, 2, 3, 5, 9, 30...)\n"
+                "`/interval auto` (detección de escenas)"
+            )
+        else:
+            msg = (
+                "📸 *Intervalo actual:* Auto (detección de escenas)\n\n"
+                "Para cambiarlo, usa:\n"
+                "`/interval <segundos>` (1, 2, 3, 5, 9, 30...)\n"
+                "`/interval auto` (detección de escenas)"
+            )
+        await update.message.reply_text(msg, parse_mode='Markdown')
+        return
+
+    if args[0].lower() == "auto":
+        set_user_interval(user.id, 0)
+        await update.message.reply_text(
+            "✅ Intervalo configurado a *Auto* (detección de escenas).\n\n"
+            "Los próximos videos usarán detección inteligente de escenas.",
+            parse_mode='Markdown'
+        )
+        return
+
+    try:
+        seconds = int(args[0])
+        if seconds < 1:
+            await update.message.reply_text("❌ El intervalo debe ser al menos 1 segundo.")
+            return
+        if seconds > 300:
+            await update.message.reply_text("❌ El intervalo máximo es 300 segundos (5 minutos).")
+            return
+
+        set_user_interval(user.id, seconds)
+        await update.message.reply_text(
+            f"✅ Intervalo configurado a *{seconds} segundos*.\n\n"
+            f"Los próximos videos capturarán un frame cada {seconds} segundos.",
+            parse_mode='Markdown'
+        )
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Usá: `/interval <segundos>` o `/interval auto`\n"
+            "Ej: `/interval 5` para capturar cada 5 segundos",
+            parse_mode='Markdown'
+        )
 
 
 async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -154,7 +258,8 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "video_file": video_file,
         "file_name": file_name,
         "notes": None,
-        "job_id": None
+        "job_id": None,
+        "frame_interval": get_user_interval(user.id)
     }
     
     # Descargar video
@@ -233,7 +338,8 @@ async def receive_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             source="telegram",
             user_id=str(user.id),
             progress=0,
-            progress_message="Esperando procesamiento..."
+            progress_message="Esperando procesamiento...",
+            frame_interval=user_data.get("frame_interval")
         )
         db.add(job)
         db.commit()
@@ -244,11 +350,17 @@ async def receive_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     process_video_task.delay(
         job_id=user_data["job_id"],
         video_path=user_data["video_path"],
-        additional_notes=notes
+        additional_notes=notes,
+        frame_interval=user_data.get("frame_interval")
     )
     
+    interval_msg = ""
+    if user_data.get("frame_interval"):
+        interval_msg = f"📸 Capturando cada {user_data['frame_interval']} segundos.\n"
+    
     await update.message.reply_text(
-        "🚀 ¡Procesamiento iniciado!\n\n"
+        f"🚀 ¡Procesamiento iniciado!\n\n"
+        f"{interval_msg}"
         "Te notificaré cuando esté listo.\n"
         "Puedes usar /estado para ver el progreso."
     )
@@ -285,7 +397,8 @@ async def skip_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             source="telegram",
             user_id=str(user.id),
             progress=0,
-            progress_message="Esperando procesamiento..."
+            progress_message="Esperando procesamiento...",
+            frame_interval=user_data.get("frame_interval")
         )
         db.add(job)
         db.commit()
@@ -296,11 +409,17 @@ async def skip_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     process_video_task.delay(
         job_id=user_data["job_id"],
         video_path=user_data["video_path"],
-        additional_notes=None
+        additional_notes=None,
+        frame_interval=user_data.get("frame_interval")
     )
     
+    interval_msg = ""
+    if user_data.get("frame_interval"):
+        interval_msg = f"📸 Capturando cada {user_data['frame_interval']} segundos.\n"
+    
     await update.message.reply_text(
-        "🚀 ¡Procesamiento iniciado!\n\n"
+        f"🚀 ¡Procesamiento iniciado!\n\n"
+        f"{interval_msg}"
         "Te notificaré cuando esté listo."
     )
     
@@ -452,6 +571,7 @@ def create_application() -> Application:
     application.add_handler(CommandHandler("ayuda", help_command))
     application.add_handler(CommandHandler("estado", check_status))
     application.add_handler(CommandHandler("cancelar", cancel_job))
+    application.add_handler(CommandHandler("interval", set_interval))
     application.add_handler(conv_handler)
     
     # Error handler
@@ -467,7 +587,8 @@ async def post_init(application: Application):
         BotCommand("start", "Iniciar el bot"),
         BotCommand("ayuda", "Mostrar guía de uso"),
         BotCommand("estado", "Ver jobs en progreso"),
-        BotCommand("cancelar", "Cancelar job actual")
+        BotCommand("cancelar", "Cancelar job actual"),
+        BotCommand("interval", "Configurar intervalo de captura de frames")
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Comandos del bot actualizados")
