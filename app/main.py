@@ -1,19 +1,24 @@
+import time as time_module
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import shutil
 from pathlib import Path
+
+import httpx
 
 from app.database import get_db, init_db
 from app.models import Job, JobStatus
 from app.config import settings
 from app.tasks import process_video_task, delete_job_files_task
 from app.processor.utils import validate_video_file, create_temp_folder, generate_job_id
+from app import __version__
 
 # Inicializar DB
 init_db()
@@ -55,13 +60,112 @@ async def verify_api_key(request: Request, credentials: Optional[HTTPAuthorizati
     return credentials.credentials
 
 
+async def check_database() -> dict:
+    """Check database connectivity"""
+    start = time_module.time()
+    db = next(get_db())
+    try:
+        db.execute(text("SELECT 1"))
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        return {"status": "pass", "time_ms": elapsed_ms}
+    except Exception as e:
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        return {"status": "fail", "time_ms": elapsed_ms, "output": f"Conexión a base de datos fallida - {e}"}
+    finally:
+        db.close()
+
+
+async def check_telegram_api() -> dict:
+    """Check Telegram Bot API connectivity"""
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return {"status": "warn", "time_ms": 0, "output": "TELEGRAM_BOT_TOKEN no configurado"}
+
+    start = time_module.time()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/getMe")
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        if resp.status_code == 200:
+            return {"status": "pass", "time_ms": elapsed_ms}
+        else:
+            return {"status": "fail", "time_ms": elapsed_ms, "output": f"Telegram API respondió {resp.status_code}"}
+    except Exception as e:
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        return {"status": "fail", "time_ms": elapsed_ms, "output": f"Telegram API no accesible - {e}"}
+
+
+def check_video_processor() -> dict:
+    """Check video processing dependencies (ffmpeg, OpenCV)"""
+    start = time_module.time()
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-version"],
+            capture_output=True, text=True, timeout=10
+        )
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        if result.returncode == 0:
+            return {"status": "pass", "time_ms": elapsed_ms}
+        else:
+            return {"status": "fail", "time_ms": elapsed_ms, "output": "ffprobe no disponible"}
+    except Exception as e:
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        return {"status": "fail", "time_ms": elapsed_ms, "output": f"Video processor check falló - {e}"}
+
+
+async def check_redis() -> dict:
+    """Check Redis connectivity"""
+    start = time_module.time()
+    import redis as redis_lib
+    try:
+        client = redis_lib.from_url(settings.REDIS_URL, socket_timeout=5)
+        client.ping()
+        client.close()
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        return {"status": "pass", "time_ms": elapsed_ms}
+    except Exception as e:
+        elapsed_ms = int((time_module.time() - start) * 1000)
+        return {"status": "fail", "time_ms": elapsed_ms, "output": f"Redis no accesible - {e}"}
+
+
 @app.get("/health")
 async def health_check():
-    """Endpoint de health check"""
+    """
+    Health check endpoint (RFC 9560)
+
+    Returns pass/fail/warn status with individual checks for:
+    - database connectivity
+    - Telegram Bot API
+    - video processor (ffprobe)
+    - Redis / Celery broker
+    """
+    db_check = await check_database()
+    tg_check = await check_telegram_api()
+    video_check = check_video_processor()
+    redis_check = await check_redis()
+
+    checks = {
+        "database": db_check,
+        "telegram_api": tg_check,
+        "video_processor": video_check,
+        "redis": redis_check,
+    }
+
+    # Global status: fail if any check is fail, warn if any is warn
+    all_statuses = [c["status"] for c in checks.values()]
+    if "fail" in all_statuses:
+        global_status = "fail"
+    elif "warn" in all_statuses:
+        global_status = "warn"
+    else:
+        global_status = "pass"
+
     return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "service": settings.SERVICE_NAME
+        "status": global_status,
+        "version": __version__,
+        "service": "VideoContextBot",
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "checks": checks,
     }
 
 
