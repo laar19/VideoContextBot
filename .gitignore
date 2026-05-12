@@ -72,6 +72,10 @@ htmlcov/
 celerybeat-schedule
 celerybeat.pid
 
+# Directories for video processing (runtime artifacts)
+output/
+temp/
+
 # Gradio
 .gradio/
 
